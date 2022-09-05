@@ -4,3 +4,6 @@ Parses site 'https://reestr.nostroy.ru/', extractig 'Compensation fund amount' p
 ### To do:
 - make python class
 - universilize PATH to writing a resulting file
+
+### Requires
+Python
