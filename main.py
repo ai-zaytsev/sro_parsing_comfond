@@ -34,7 +34,7 @@ def main():
     script, sro = argv
     
     if sro == 'nostroy':
-        filename = "/home/alex/Work/nostroyinfo.txt"
+        filename = "/home/alex/Work/nostroy.txt"
         for key, value in sro_dict.NOSTROY_SRO_DICT.items():
             url = 'https://api-open-nostroy.anonamis.ru/api/sro/' + str(value) +'/member/list'
             data = key + " : " + str(get_compfund_see_odo_sum_per_sro(url)) + "\n"
@@ -42,7 +42,7 @@ def main():
             print("Info added to file")
         print("Script comleted with status: Done")
     elif sro == 'nopriz':
-        filename = "/home/alex/Work/nosprizinfo.txt"
+        filename = "/home/alex/Work/nopriz.txt"
         for key, value in sro_dict.NOPRIZ_SRO_DICT.items():
             url = 'https://reestr.nopriz.ru/api/sro/' + str(value) +'/member/list'
             data = key + " : " + str(get_compfund_see_odo_sum_per_sro(url)) + "\n"
