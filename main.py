@@ -1,5 +1,4 @@
 import requests
-import sro_dict
 from sys import argv
 
 def get_compfund_see_odo_sum_from_page(url, page_num):
@@ -30,22 +29,64 @@ def write_to_file(filename, data):
     with open(filename, "a") as file:
         file.write(data)
 
+def get_nostroy_dict_items():
+    i = 266
+    nostroy_sro_dict = {}
+    while i < 600:
+        sro_url = "https://api-open-nostroy.anonamis.ru/api/sro/" + str(i)
+        r = requests.post(sro_url)
+        if r.status_code == 200:
+            data_dict = r.json()
+            short_description = data_dict['data']['short_description']
+            registration_number = data_dict['data']['registration_number']
+            dict_key = registration_number + ' ' + short_description
+            nostroy_sro_dict[dict_key] = i
+            print("Added " + short_description + " with ID " + str(i) )
+        else:
+            print(str(i) + " not found")
+        i = i + 1
+    return nostroy_sro_dict.items()
+
+def get_nopriz_dict_items():
+    i = 0
+    nopriz_sro_dict = {}
+    while i < 600:
+        sro_url = "https://reestr.nopriz.ru/api/sro/" + str(i)
+        r = requests.post(sro_url)
+        if r.status_code == 200:
+            data_dict = r.json()
+            short_description = data_dict['data']['short_description']
+            registration_number = data_dict['data']['registration_number']
+            dict_key = registration_number + ' ' + short_description
+            nopriz_sro_dict[dict_key] = i
+            print("Added " + short_description + " with ID " + str(i) )
+        else:
+            print(str(i) + " not found")
+        i = i + 1
+    return nopriz_sro_dict.items()
+
 def main():
     script, sro = argv
     
     if sro == 'nostroy':
         filename = "/home/alex/Work/nostroy.txt"
-        for key, value in sro_dict.NOSTROY_SRO_DICT.items():
+        nostroy_dict_items = get_nostroy_dict_items()
+        print("Dict full")
+        for key, value in nostroy_dict_items:
             url = 'https://api-open-nostroy.anonamis.ru/api/sro/' + str(value) +'/member/list'
             data = key + " : " + str(get_compfund_see_odo_sum_per_sro(url)) + "\n"
+            print("Starting writing to file")
             write_to_file(filename, data)
             print("Info added to file")
         print("Script comleted with status: Done")
     elif sro == 'nopriz':
         filename = "/home/alex/Work/nopriz.txt"
-        for key, value in sro_dict.NOPRIZ_SRO_DICT.items():
+        nopriz_dict_items = get_nopriz_dict_items()
+        print("Dict full")
+        for key, value in nopriz_dict_items:
             url = 'https://reestr.nopriz.ru/api/sro/' + str(value) +'/member/list'
             data = key + " : " + str(get_compfund_see_odo_sum_per_sro(url)) + "\n"
+            print("Starting writing to file")
             write_to_file(filename, data)
             print("Info added to file")
         print("Script comleted with status: Done")
