@@ -51,7 +51,8 @@ async def get_number_of_pages(session, url):
     data_dict = await fetch(session, url, json_data)
     number_of_members = int(data_dict['data']['count'])
     number_of_pages = int(data_dict['data']['countPages'])
-    logger.debug(f"Number of members: {number_of_members}. Number of pages: {number_of_pages}")
+    logger.debug(f"Data recieved: {data_dict}")
+    logger.debug(f"Number of members: {number_of_members}, number of pages: {number_of_pages} for url {url}")
     return number_of_pages
 
 
