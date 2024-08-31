@@ -31,9 +31,7 @@ async def fetch(session, url, json_data=None):
                 headers=response.headers
             )
         response_data = await response.json()
-        # Логирование только поля 'message', если оно существует в ответе
-        message = response_data.get('message', 'No message field in response')
-        logger.debug(f"Received message: {message}")
+        logger.debug(f"Received response: {response_data}")
         return response_data
 
 
