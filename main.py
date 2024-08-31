@@ -18,12 +18,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def fetch(session, url, json_data=None):
-    logger.debug(f"Sending POST request to {url} with data: {json_data}")
+    logger.debug(f"Sending POST request to {url}")
     async with session.post(url, json=json_data) as response:
         if response.status != 200:
             text = await response.text()
-            logger.error(f"Failed request to {url}: Status {response.status}")
-            logger.error(f"Response: {text}")
+            logger.error(f"Failed request to {url}: Status {response.status}. Response: {text}")
             raise aiohttp.ClientResponseError(
                 request_info=response.request_info,
                 history=response.history,
@@ -32,7 +31,9 @@ async def fetch(session, url, json_data=None):
                 headers=response.headers
             )
         response_data = await response.json()
-        logger.debug(f"Received response: {response_data}")
+        # Логирование только поля 'message', если оно существует в ответе
+        message = response_data.get('message', 'No message field in response')
+        logger.debug(f"Received message: {message}")
         return response_data
 
 
@@ -87,9 +88,9 @@ async def get_nostroy_dict_items(session):
             registration_number = data_dict['data']['registration_number']
             dict_key = f"{registration_number} {short_description}"
             nostroy_sro_dict[dict_key] = i
-            logger.debug(f"Added {short_description} with ID {i}")
+            logger.debug(f"Добавлено {short_description} с ID {i}")
         except Exception as e:
-            logger.warning(f"{i} not found. Exception: {e}")
+            logger.warning(f"СРО с ID {i} не найдено.")
     return nostroy_sro_dict.items()
 
 async def get_nopriz_dict_items(session):
@@ -102,20 +103,10 @@ async def get_nopriz_dict_items(session):
             registration_number = data_dict['data']['registration_number']
             dict_key = f"{registration_number} {short_description}"
             nopriz_sro_dict[dict_key] = i
-            logger.debug(f"Added {short_description} with ID {i}")
+            logger.debug(f"Добавлено {short_description} с ID {i}")
         except Exception as e:
-            logger.warning(f"{i} not found. Exception: {e}")
+            logger.warning(f"СРО с ID {i} не найдено.")
     return nopriz_sro_dict.items()
-
-async def main():
-    script, sro = argv
-
-    home_dir = os.path.expanduser("~")
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-
-    # Отключение проверки сертификата (для тестирования)
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
 
 async def main():
     script, sro = argv
