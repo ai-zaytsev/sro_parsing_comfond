@@ -7,7 +7,19 @@ import certifi
 
 async def fetch(session, url, json_data=None):
     async with session.post(url, json=json_data) as response:
+        if response.status != 200:
+            text = await response.text()
+            print(f"Failed request to {url}: Status {response.status}")
+            print(f"Response: {text}")
+            raise aiohttp.ClientResponseError(
+                request_info=response.request_info,
+                history=response.history,
+                status=response.status,
+                message=f"Unexpected response status: {response.status}",
+                headers=response.headers
+            )
         return await response.json()
+
 
 async def get_compfund_see_odo_sum_from_page(session, url, page_num):
     json_data = {"filters": {"member_status": 1}, "page": page_num, "pageCount": "100", "sortBy": {}}
@@ -38,8 +50,6 @@ async def get_nostroy_dict_items(session):
     nostroy_sro_dict = {}
     for i in range(1, 600):
         sro_url = f"https://reestr.nostroy.ru/api/sro/{i}"
-        data_dict = await fetch(session, sro_url)
-        print(data_dict)
         try:
             data_dict = await fetch(session, sro_url)
             short_description = data_dict['data']['short_description']
@@ -72,6 +82,10 @@ async def main():
     home_dir = os.path.expanduser("~")
     ssl_context = ssl.create_default_context(cafile=certifi.where())
 
+    # Отключение проверки сертификата (для тестирования)
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
         if sro == 'nostroy':
             filename = os.path.join(home_dir, "nostroy.txt")
@@ -79,7 +93,7 @@ async def main():
             print("Dict full")
             tasks = []
             for key, value in nostroy_dict_items:
-                url = f"https://api-open-nostroy.anonamis.ru/api/sro/{value}/member/list"
+                url = f"https://reestr.nopriz.ru/api/sro/{value}/member/list"
                 task = asyncio.create_task(get_compfund_see_odo_sum_per_sro(session, url))
                 tasks.append((key, task))
 
