@@ -31,13 +31,13 @@ async def fetch(session, url, json_data=None):
                 headers=response.headers
             )
         response_data = await response.json()
-        logger.debug(f"Received response: {response_data}")
+        logger.debug(f"Succesfully received response")
         return response_data
 
 
 async def get_compfund_fee_odo_sum_from_page(session, url, page_num):
     logger.debug(f"Fetching data for page {page_num}")
-    json_data = {"filters": {"member_status": 1}, "page": page_num, "pageCount": "100", "sortBy": {}}
+    json_data = {"filters": {"member_status": 1}, "page": page_num, "pageCount": "100", "sortBy": {"compensation_fund_fee_odo": "DESC"}}
     data_dict = await fetch(session, url, json_data)
     data = data_dict['data']['data']
     compensation_fund_fee_odo_per_page = sum(float(i.get('compensation_fund_fee_odo', 0)) for i in data)
@@ -47,10 +47,11 @@ async def get_compfund_fee_odo_sum_from_page(session, url, page_num):
 
 async def get_number_of_pages(session, url):
     logger.debug(f"Fetching number of pages for URL: {url}")
-    json_data = {"filters": {"member_status": 1}, "page": 1, "pageCount": "100", "sortBy": {}}
+    json_data = {"filters": {"member_status": 1}, "page": 1, "pageCount": "100", "sortBy": {"compensation_fund_fee_odo": "DESC"}}
     data_dict = await fetch(session, url, json_data)
+    number_of_members = int(data_dict['data']['count'])
     number_of_pages = int(data_dict['data']['countPages'])
-    logger.debug(f"Number of pages: {number_of_pages}")
+    logger.debug(f"Number of members: {number_of_members}. Number of pages: {number_of_pages}")
     return number_of_pages
 
 
@@ -78,7 +79,7 @@ def write_to_file(filename, data):
 
 async def get_nostroy_dict_items(session):
     nostroy_sro_dict = {}
-    for i in range(1, 600):
+    for i in range(371, 372):
         sro_url = f"https://reestr.nostroy.ru/api/sro/{i}"
         try:
             data_dict = await fetch(session, sro_url)
