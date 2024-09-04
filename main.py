@@ -17,8 +17,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def fetch(session, url, json_data=None):
-    logger.debug(f"Sending POST request to {url}")
+async def fetch(session, url, json_data):
+    logger.debug(f"Sending POST request to {url} with payload {json_data}")
     async with session.post(url, json=json_data) as response:
         if response.status != 200:
             text = await response.text()
@@ -51,8 +51,7 @@ async def get_number_of_pages(session, url):
     data_dict = await fetch(session, url, json_data)
     number_of_members = int(data_dict['data']['count'])
     number_of_pages = int(data_dict['data']['countPages'])
-    logger.debug(f"Data recieved: {data_dict}")
-    logger.debug(f"Number of members: {number_of_members}, number of pages: {number_of_pages} for url {url}")
+    logger.debug(f"Number of pages to process: {number_of_pages} for url {url}")
     return number_of_pages
 
 
@@ -60,7 +59,6 @@ async def get_compfund_fee_odo_sum_per_sro(session, url):
     logger.debug(f"Starting to collect compensation fund fee ODO sum for URL: {url}")
     comfund_odo_total = 0
     number_of_pages = await get_number_of_pages(session, url)
-    logger.debug(f"Total pages to process: {number_of_pages}")
     tasks = [get_compfund_fee_odo_sum_from_page(session, url, page) for page in range(1, number_of_pages + 1)]
     results = await asyncio.gather(*tasks)
     comfund_odo_total = sum(results)
@@ -90,7 +88,7 @@ async def get_nostroy_dict_items(session):
             nostroy_sro_dict[dict_key] = i
             logger.debug(f"Добавлено {short_description} с ID {i}")
         except Exception as e:
-            logger.warning(f"СРО с ID {i} не найдено.")
+            logger.warning(f"СРО с ID {i} не найдено. Ошибка: {e}")
     return nostroy_sro_dict.items()
 
 async def get_nopriz_dict_items(session):
