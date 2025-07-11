@@ -1,165 +1,146 @@
 import aiohttp
 import asyncio
 import os
-from sys import argv
 import ssl
 import certifi
-import logging
+import csv
+from sys import argv
 
-# Настройка логирования с сохранением в файл
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("app.log"),  # Логи будут сохраняться в файл "app.log" в корне проекта
-        logging.StreamHandler()  # Логи также будут выводиться в консоль
-    ]
-)
-logger = logging.getLogger(__name__)
+# ========== Настройки ==========
+PAGE_SIZE = 100
+PAGE_CONCURRENCY = 100    # макс. одновременных запросов страниц
+MEMBER_CONCURRENCY = 50   # макс. одновременных задач по SRO
+
+# семафор для ограничения параллельных fetch по страницам
+page_sem = asyncio.Semaphore(PAGE_CONCURRENCY)
 
 async def fetch(session, url, json_data):
-    logger.debug(f"Sending POST request to {url} with payload {json_data}")
-    async with session.post(url, json=json_data) as response:
-        if response.status != 200:
-            text = await response.text()
-            logger.error(f"Failed request to {url}: Status {response.status}. Response: {text}")
-            raise aiohttp.ClientResponseError(
-                request_info=response.request_info,
-                history=response.history,
-                status=response.status,
-                message=f"Unexpected response status: {response.status}",
-                headers=response.headers
-            )
-        response_data = await response.json()
-        logger.debug(f"Succesfully received response")
-        return response_data
+    """POST-запрос с проверкой статуса."""
+    async with session.post(url, json=json_data) as resp:
+        resp.raise_for_status()
+        return await resp.json()
 
+async def get_nopriz_sro_items(session):
+    """Список действующих и ожидающих СРО из NOPRIZ."""
+    url = "https://reestr.nopriz.ru/api/sro/list"
+    payload = {
+        "filters": {"state": ["enabled", "wait"]},
+        "pageCount": str(PAGE_SIZE),
+        "searchString": None,
+        "sortBy": {
+            "registry_registration_date": "DESC",
+            "suspension_date": "DESC"
+        }
+    }
+    first = await fetch(session, url, {**payload, "page": 1})
+    pages = int(first['data']['countPages'])
+    items = []
+    for page in range(1, pages + 1):
+        resp = await fetch(session, url, {**payload, "page": page})
+        for s in resp['data']['data']:
+            items.append((s['registration_number'], s['short_description'], s['id'], "nopriz"))
+    return items
 
-async def get_compfund_fee_odo_sum_from_page(session, url, page_num):
-    logger.debug(f"Fetching data for page {page_num}")
-    json_data = {"filters": {"member_status": 1}, "page": page_num, "pageCount": "100", "sortBy": {"compensation_fund_fee_odo": "DESC"}}
-    data_dict = await fetch(session, url, json_data)
-    data = data_dict['data']['data']
-    compensation_fund_fee_odo_per_page = sum(float(i.get('compensation_fund_fee_odo', 0)) for i in data)
-    logger.debug(f"Page {page_num} sum: {compensation_fund_fee_odo_per_page}")
-    return compensation_fund_fee_odo_per_page
+async def get_nostroy_sro_items(session):
+    """Список действующих СРО из NOSTROY."""
+    url = "https://reestr.nostroy.ru/api/sro/list"
+    payload = {
+        "filters": {"state": "enabled"},
+        "pageCount": str(PAGE_SIZE),
+        "sortBy": {}
+    }
+    first = await fetch(session, url, {**payload, "page": 1})
+    pages = int(first['data']['countPages'])
+    items = []
+    for page in range(1, pages + 1):
+        resp = await fetch(session, url, {**payload, "page": page})
+        for s in resp['data']['data']:
+            items.append((s['registration_number'], s['short_description'], s['id'], "nostroy"))
+    return items
 
+async def sum_for_one_page(session, list_url, page_num):
+    """Суммируем по одной странице members/list."""
+    async with page_sem:
+        payload = {
+            "filters": {"member_status": 1},
+            "page": page_num,
+            "pageCount": str(PAGE_SIZE),
+            "searchString": "",
+            "sortBy": {}
+        }
+        resp = await fetch(session, list_url, payload)
+        total = 0.0
+        for m in resp['data']['data']:
+            odo = (m.get('member_right_odo') or {}).get('compensation_fund')
+            if odo is None:
+                odo = m.get('compensation_fund_fee_odo', 0)
+            try:
+                total += float(odo)
+            except (TypeError, ValueError):
+                pass
+        return total
 
-async def get_number_of_pages(session, url):
-    logger.debug(f"Fetching number of pages for URL: {url}")
-    json_data = {"filters": {"member_status": 1}, "page": 1, "pageCount": "100", "sortBy": {"compensation_fund_fee_odo": "DESC"}}
-    data_dict = await fetch(session, url, json_data)
-    number_of_members = int(data_dict['data']['count'])
-    number_of_pages = int(data_dict['data']['countPages'])
-    logger.debug(f"Number of pages to process: {number_of_pages} for url {url}")
-    return number_of_pages
-
-
-async def get_compfund_fee_odo_sum_per_sro(session, url):
-    logger.debug(f"Starting to collect compensation fund fee ODO sum for URL: {url}")
-    comfund_odo_total = 0
-    number_of_pages = await get_number_of_pages(session, url)
-    tasks = [get_compfund_fee_odo_sum_from_page(session, url, page) for page in range(1, number_of_pages + 1)]
-    results = await asyncio.gather(*tasks)
-    comfund_odo_total = sum(results)
-    logger.debug(f"Total compensation fund fee ODO sum: {comfund_odo_total}")
-    return comfund_odo_total
-
-
-def write_to_file(filename, data):
-    logger.debug(f"Attempting to write data to {filename}")
-    try:
-        with open(filename, "a") as file:
-            file.write(data)
-        logger.debug(f"Data successfully written to {filename}")
-    except Exception as e:
-        logger.error(f"Failed to write data to {filename}: {e}")
-        raise
-
-async def get_nostroy_dict_items(session):
-    nostroy_sro_dict = {}
-    for i in range(371, 372):
-        sro_url = f"https://reestr.nostroy.ru/api/sro/{i}"
-        try:
-            data_dict = await fetch(session, sro_url)
-            short_description = data_dict['data']['short_description']
-            registration_number = data_dict['data']['registration_number']
-            dict_key = f"{registration_number} {short_description}"
-            nostroy_sro_dict[dict_key] = i
-            logger.debug(f"Добавлено {short_description} с ID {i}")
-        except Exception as e:
-            logger.warning(f"СРО с ID {i} не найдено. Ошибка: {e}")
-    return nostroy_sro_dict.items()
-
-async def get_nopriz_dict_items(session):
-    nopriz_sro_dict = {}
-    for i in range(1, 600):
-        sro_url = f"https://reestr.nopriz.ru/api/sro/{i}"
-        try:
-            data_dict = await fetch(session, sro_url)
-            short_description = data_dict['data']['short_description']
-            registration_number = data_dict['data']['registration_number']
-            dict_key = f"{registration_number} {short_description}"
-            nopriz_sro_dict[dict_key] = i
-            logger.debug(f"Добавлено {short_description} с ID {i}")
-        except Exception as e:
-            logger.warning(f"СРО с ID {i} не найдено.")
-    return nopriz_sro_dict.items()
+async def compute_sro(session, api_base, reg_no, short_desc, sid, sem):
+    """Задача: суммирует фонд по SRO и возвращает данные для CSV."""
+    async with sem:
+        list_url = f"{api_base}/{sid}/member/list"
+        first = await fetch(session, list_url, {
+            "filters": {"member_status": 1},
+            "page": 1,
+            "pageCount": str(PAGE_SIZE),
+            "searchString": "",
+            "sortBy": {}
+        })
+        pages = int(first['data']['countPages'])
+        tasks = [asyncio.create_task(sum_for_one_page(session, list_url, p))
+                 for p in range(1, pages + 1)]
+        results = await asyncio.gather(*tasks)
+        total_int = int(round(sum(results)))
+        return reg_no, short_desc, total_int
 
 async def main():
-    script, sro = argv
+    mode = argv[1] if len(argv) > 1 and argv[1] in ("nopriz", "nostroy", "both") else "both"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    out_path = os.path.join(script_dir, "result.csv")
 
-    home_dir = os.path.expanduser("~")
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    # подготовка CSV
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
+        csv.writer(f).writerow(["registration_number", "short_description", "compfund_fee_odo_sum"])
 
-    # Отключение проверки сертификата (для тестирования)
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    connector = aiohttp.TCPConnector(ssl=ssl_ctx, limit=200)
+    sem = asyncio.Semaphore(MEMBER_CONCURRENCY)
 
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
-        if sro == 'nostroy':
-            logger.debug(f"Processing 'nostroy' SRO")
-            filename = os.path.join(home_dir, "nostroy.txt")
-            nostroy_dict_items = await get_nostroy_dict_items(session)
-            logger.debug("Dictionary full")
-            tasks = []
-            for key, value in nostroy_dict_items:
-                url = f"https://reestr.nopriz.ru/api/sro/{value}/member/list"
-                task = asyncio.create_task(get_compfund_fee_odo_sum_per_sro(session, url))
-                tasks.append((key, task))
+    async with aiohttp.ClientSession(connector=connector) as session:
+        all_sros = []
+        if mode in ("nopriz", "both"):
+            all_sros += await get_nopriz_sro_items(session)
+        if mode in ("nostroy", "both"):
+            all_sros += await get_nostroy_sro_items(session)
 
-            for key, task in tasks:
-                data = f"{key} : {await task}\n"
-                logger.debug("Starting writing to file")
-                write_to_file(filename, data)
-                logger.debug("Info added to file")
-            logger.info("Script completed with status: Done")
+        tasks = [asyncio.create_task(
+            compute_sro(
+                session,
+                "https://reestr.nopriz.ru/api/sro" if src == "nopriz" else "https://reestr.nostroy.ru/api/sro",
+                reg_no, short_desc, sid, sem
+            )
+        ) for reg_no, short_desc, sid, src in all_sros]
 
-        elif sro == 'nopriz':
-            logger.debug(f"Processing 'nopriz' SRO")
-            filename = os.path.join(home_dir, "nopriz.txt")
-            nopriz_dict_items = await get_nopriz_dict_items(session)
-            logger.debug("Dictionary full")
-            tasks = []
-            for key, value in nopriz_dict_items:
-                url = f"https://reestr.nopriz.ru/api/sro/{value}/member/list"
-                task = asyncio.create_task(get_compfund_fee_odo_sum_per_sro(session, url))
-                tasks.append((key, task))
-
-            for key, task in tasks:
-                data = f"{key} : {await task}\n"
-                logger.debug("Starting writing to file")
-                write_to_file(filename, data)
-                logger.debug("Info added to file")
-            logger.info("Script completed with status: Done")
-
-        else:
-            print(f'Unknown argument: {sro}. Please type "nopriz" or "nostroy"')
+        # Batch write CSV по мере готовности
+        batch = []
+        BATCH_SIZE = 50
+        with open(out_path, "a", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            for coro in asyncio.as_completed(tasks):
+                reg_no, short_desc, total_int = await coro
+                batch.append([reg_no, short_desc, total_int])
+                if len(batch) >= BATCH_SIZE:
+                    writer.writerows(batch)
+                    batch.clear()
+            if batch:
+                writer.writerows(batch)
 
 if __name__ == '__main__':
-    logger.info("Script started")
-    try:
-        asyncio.run(main())
-        logger.info("Script finished successfully")
-    except Exception as e:
-        logger.exception("Script terminated with an error")
+    asyncio.run(main())
