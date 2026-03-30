@@ -7,6 +7,7 @@
 Скрипт суммирует взносы в компенсационный фонд (ООД) для каждой СРО, выводя готовый CSV-отчёт.
 
 Работает **асинхронно**, поэтому обрабатывает сотни страниц параллельно.
+При временных сетевых сбоях скрипт автоматически повторяет запросы и не завершает весь запуск из-за одного разрыва соединения.
 
 Проверка SSL отключена (`ssl_ctx.verify_mode = ssl.CERT_NONE`), так как серверы реестров могут отдавать некорректные сертификаты.
 
@@ -16,6 +17,7 @@
    ```bash
    git clone https://github.com/ai-zaytsev/sro_parsing_comfond.git
    cd sro_parsing_comfond
+   ```
 
 2. **(Опционально) виртуальное окружение**
 
@@ -61,11 +63,16 @@
 # Сборка
 docker build -t aizaytsev/sro-parsing-comfond:latest .
 
-# Тестовый запуск (результат сохранится в текущую папку)
+# Тестовый запуск: результат будет в ./output/result.csv
 mkdir -p output
 docker run --rm \
-  -v $(pwd)/output:/app \
-  aizaytsev/sro-parsing-comfond:latest both
+  -v "$(pwd)/output:/data" \
+  aizaytsev/sro-parsing-comfond:latest
+
+# Явный выбор режима
+docker run --rm \
+  -v "$(pwd)/output:/data" \
+  aizaytsev/sro-parsing-comfond:latest nostroy
 ```
 
 ### Обновление Docker-образа на сервере
@@ -79,7 +86,16 @@ docker rm sro_parser  || true
 
 docker run --rm -d \
   --name sro_parser \
-  -v /srv/sro_data:/app \
+  -v /srv/sro_data:/data \
+  aizaytsev/sro-parsing-comfond:latest
+```
+
+Если нужно явно передать режим:
+
+```bash
+docker run --rm -d \
+  --name sro_parser \
+  -v /srv/sro_data:/data \
   aizaytsev/sro-parsing-comfond:latest both
 ```
 
@@ -92,6 +108,7 @@ docker run --rm -d \
 | `ModuleNotFoundError: No module named 'aiohttp'` | Установите зависимости: `pip install -r requirements.txt`      |
 | `SSL: CERTIFICATE_VERIFY_FAILED`                 | Проверка SSL уже отключена, ошибка не должна возникнуть.       |
 | `PermissionError: [Errno 13]` при записи CSV     | Убедитесь, что у вас есть права на запись в монтируемую папку. |
+| `aiohttp.client_exceptions.ServerDisconnectedError` | Обновите образ до свежей версии: в код добавлены повторы запросов и снижена параллельность. |
 
 ---
 
